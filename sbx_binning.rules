@@ -1,0 +1,65 @@
+rule all_binning:
+    input:
+        str(ASSEMBLY_FP/'contigs_coverage.txt')
+    output:
+        #files created after successful rule completion
+    conda:
+        "sbx_mag_env.yml"
+    shell:
+ 
+#### metabat #### 
+
+rule metabat_coverage:
+    input:
+        bam=str(ASSEMBLY_FP/'contigs'/'minimap2'/'{sample}.sorted.bam')
+    output:
+        depth=str(ASSEMBLY_FP/'contigs'/'{sample}-contigs.fa.depth.txt')
+    log:
+        str(Cfg['all']['output_fp']/'binning'/'logs'/'{sample}-metabat.log')
+    conda:
+        "sbx_binning_env.yml"
+    shell:
+        """
+        jgi_summarize_bam_contig_depths \
+            --outputDepth {output.depth} {input.bam} >{log} 2>&1
+        """
+
+rule metabat:
+    input:
+        contig=str(ASSEMBLY_FP/'contigs'/'{sample}-contigs.fa'),
+        depth=str(ASSEMBLY_FP/'contigs'/'{sample}-contigs.fa.depth.txt')
+    output:
+        out=str(Cfg['all']['output_fp']/'binning'/'metabat'/'{sample}-metabat')
+    log:
+        str(Cfg['all']['output_fp']/'binning'/'logs'/'{sample}-metabat.log')
+    params:
+        m=Cfg['sbx_binning']['min_contig_length'],
+        threads=Cfg['sbx_binning']['threads']
+
+    shell:
+        """
+        metabat2 -i {input.contig} -a {input.depth} -m {params.m} -t {params.threads} \
+            -o {output.out} --saveCls --noBinOut > {log} 2>&1
+        """
+
+
+##### maxbin2 #####
+
+rule maxbin:
+    input:
+        contig=str(ASSEMBLY_FP/'contigs'/'{sample}-contigs.fa'),
+        reads=str(QC_FP/’decontam’/’{sample}_1.fastq.gz’)
+    output:
+        out=str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin')
+    log:
+        str(Cfg['all']['output_fp']/'binning'/'logs'/'{sample}-maxbin.log')
+    params:
+        markerset=config["maxbin"]["markerset"],
+        threads=Cfg['sbx_binning']['threads'],
+        m=Cfg['sbx_binning']['min_contig_length']
+    shell:
+        """
+        run_MaxBin.pl -markerset {params.markerset} -contig {input.contig} \
+            {input.reads} -min_contig_length {params.m} -thread {params.threads} \
+            -out {output.out} >{log} 2>{log}
+        """

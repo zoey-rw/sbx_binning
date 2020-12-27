@@ -6,24 +6,59 @@ rule all_binning:
         #       sample=Samples.keys())
         expand(str(Cfg['all']['output_fp']/'binning'/'{sample}_dastool.done'),sample=Samples.keys())
  
-#### metabat #### 
 
-rule metabat_coverage:
+#####################################
+########### MAXBIN2 #################
+#####################################
+
+rule maxbin2:
+    input:
+        contig=str(ASSEMBLY_FP/'contigs'/'{sample}-contigs.fa'),
+        reads=str(QC_FP/'decontam'/'{sample}_1.fastq.gz')
+    output:
+        outdir=str(Cfg['all']['output_fp']/'binning'/'{sample}'/'maxbin_output'/'maxbin_output'),
+        outfile=str(Cfg['all']['output_fp']/'binning'/'{sample}'/'maxbin_output'/'maxbin_output.001.fasta')
+        #directory(str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin'))
+        #str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin'/'{sample}.summary'),
+        #str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}'/'{sample}.summary'),
+    log:
+        str(Cfg['all']['output_fp']/'binning'/'logs'/'{sample}-maxbin.log')
+    params:
+        markerset=config["maxbin"]["markerset"],
+        threads=Cfg['sbx_binning']['threads'],
+        m=Cfg['sbx_binning']['min_contig_length']
+    shell:
+        """
+        #mkdir -p {params.outdir}
+        run_MaxBin.pl -thread {params.threads} -contig {input.contig} -markerset {params.markerset} -reads {input.reads} -min_contig_length 1000 -out {output.outdir} &&\
+        touch maxbin.done &&\
+        date) 2> >(tee {log}.stderr) > >(tee {log}.stdout)
+        """
+
+#####################################
+########### METABAT2 ################
+#####################################
+
+rule depth_files:
     input:
         bam=str(ASSEMBLY_FP/'contigs'/'minimap2'/'{sample}.sorted.bam')
     output:
-        depth=str(ASSEMBLY_FP/'contigs'/'{sample}-contigs.fa.depth.txt')
+        depth=str(ASSEMBLY_FP/'contigs'/'{sample}_depth.txt')
     shell:
         """
-        jgi_summarize_bam_contig_depths --outputDepth {output.depth} {input.bam}
+        (date &&\
+        jgi_summarize_bam_contig_depths --outputDepth {output.depth} {input.bam} &&\
+        touch depth_file.done &&\
+        date) 2> >(tee {log}.stderr) > >(tee {log}.stdout)
         """
 
-rule metabat:
+rule metabat2:
     input:
         contig=str(ASSEMBLY_FP/'contigs'/'{sample}-contigs.fa'),
-        depth=str(ASSEMBLY_FP/'contigs'/'{sample}-contigs.fa.depth.txt')
+        depth=str(ASSEMBLY_FP/'contigs'/'{sample}_depth.txt')
     output:
-        str(Cfg['all']['output_fp']/'binning'/'metabat'/'{sample}-metabat.tsv')
+        outdir=str(Cfg['all']['output_fp']/'binning'/'{sample}'/'metabat_output'),
+        outfile=str(Cfg['all']['output_fp']/'binning'/'{sample}'/'metabat_output'/'{sample}_metabat.scaffolds2bin.tsv')
     log:
         str(Cfg['all']['output_fp']/'binning'/'logs'/'{sample}-metabat.log')
     params:
@@ -32,61 +67,38 @@ rule metabat:
 
     shell:
         """
-        metabat2 -i {input.contig} -a {input.depth} -m {params.m} -t {params.threads} -o {output} --saveCls --noBinOut > {log}
+        (date &&\
+        metabat2 -i {input.contig} -a {input.depth} -m {params.m} -t {params.threads} -o {output.outfile} --saveCls --noBinOut &&\
+        touch metabat2.done &&\
+        date) 2> >(tee {log}.stderr) > >(tee {log}.stdout)
         """
 
 
-##### maxbin2 #####
+#####################################
+########### DAS_Tool ################
+#####################################
 
-rule maxbin:
+rule scaffold_list:
+    input:
+        metabat=str(Cfg['all']['output_fp']/'binning'/'{sample}'/'metabat_output'),
+        file=str(Cfg['all']['output_fp']/'binning'/'{sample}'/'maxbin_output'/'maxbin_output.001.fasta')
+    output:
+        tsv=str(Cfg['all']['output_fp']/'binning'/'{sample}'/'maxbin_output'/'{sample}_maxbin.scaffolds2bin.tsv')
+    shell:
+        """
+        (date &&\
+        Fasta_to_Scaffolds2Bin.sh -e fasta -i {params} > {output.tsv} &&\
+        touch scaffold_list.done &&\
+        date) 2> >(tee {log}.stderr) > >(tee {log}.stdout)
+        """
+
+rule DAS_Tool: 
     input:
         contig=str(ASSEMBLY_FP/'contigs'/'{sample}-contigs.fa'),
-        reads=str(QC_FP/'decontam'/'{sample}_1.fastq.gz')
+        maxbin=str(Cfg['all']['output_fp']/'binning'/'{sample}'/'maxbin_output'/'{sample}_maxbin.scaffolds2bin.tsv'),
+        metabat=str(Cfg['all']['output_fp']/'binning'/'{sample}'/'metabat_output'/'{sample}_metabat.scaffolds2bin.tsv')
     output:
-        #touch(str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin'/'done'))
-        #directory(str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin'))
-        #str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin'/'{sample}.summary'),
-        #str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}'/'{sample}.summary'),
-        maxfile=touch(str(Cfg['all']['output_fp']/'binning'/'{sample}_maxbin.done'))
-        #touch(str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin'/'{sample}'))
-    log:
-        str(Cfg['all']['output_fp']/'binning'/'logs'/'{sample}-maxbin.log')
-    params:
-        markerset=config["maxbin"]["markerset"],
-        threads=Cfg['sbx_binning']['threads'],
-        m=Cfg['sbx_binning']['min_contig_length'],
-        outdir=str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin'),
-        outfiles=str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin'/'{sample}'),
-        basename=str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}'),
-    shell:
-        """
-        mkdir -p {params.outdir}
-        run_MaxBin.pl -markerset {params.markerset} -contig {input.contig} {input.reads} -min_contig_length 1000 -thread {params.threads} -out {params.basename} > {log} 
-        touch {output.maxfile}
-        """
-
-
-rule dastool_input:
-    input:
-        touched=str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin'/'{sample}'),
-        sum=str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin'/'{sample}.summary'),
-    output:
-        tsv=str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin.tsv')
-    params:
-        #str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin')
-        str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}')
-    shell:
-        """
-        Fasta_to_Scaffolds2Bin.sh -e fasta -i {params} > {output.tsv}
-        """
-
-rule run_dastool: 
-    input:
-        maxbin=str(Cfg['all']['output_fp']/'binning'/'maxbin'/'{sample}-maxbin.tsv'),
-        metabat=str(Cfg['all']['output_fp']/'binning'/'metabat'/'{sample}-metabat.tsv'),
-        contig=str(ASSEMBLY_FP/'contigs'/'{sample}-contigs.fa')
-    output:
-        das_out=directory(str(Cfg['all']['output_fp']/'binning'/'dastool'/'{sample}_DAStool_bins')),
+        das_out=directory(str(Cfg['all']['output_fp']/'binning'/'{sample'/'dastool_output'/'{sample}_DAStool_bins')),
         damfile=touch(str(Cfg['all']['output_fp']/'binning'/'{sample}_dastool.done'))
     params:
         threads=Cfg['sbx_binning']['threads'],
@@ -96,8 +108,10 @@ rule run_dastool:
         str(Cfg['all']['output_fp']/'binning'/'logs'/'{sample}-dastool.log')
     shell:
         """
-        DAS_Tool -i {input.maxbin},{input.metabat} -c {input.contig} -l MaxBin,MetaBAT -o {params.basename} -p {params.prot} -t {params.threads} --write_bins 1 --debug > {log} 
-        touch {output.damfile}
+        (date &&\
+        DAS_Tool -i {input.maxbin},{input.metabat} -c {input.contig} -l MaxBin,MetaBAT -o {params.basename} -p {params.prot} -t {params.threads} --write_bins 1 --debug &&\
+        touch {output.damfile} &&\
+        date) 2> >(tee {log}.stderr) > >(tee {log}.stdout)
         """
     
 
